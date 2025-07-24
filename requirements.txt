@@ -1,0 +1,11 @@
+requests==2.31.0
+urllib3==1.26.16
+llama-index
+openai
+tqdm
+nltk
+sentence_transformers
+transformers
+faiss-cpu
+sentencepiece
+protobuf
