@@ -9,3 +9,4 @@ transformers
 faiss-cpu
 sentencepiece
 protobuf
+chromadb
