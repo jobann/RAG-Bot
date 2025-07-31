@@ -15,3 +15,4 @@ myenv/
 
 # Logs and temp files
 *.log
+.DS_Store

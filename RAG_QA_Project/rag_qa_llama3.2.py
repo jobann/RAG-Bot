@@ -24,7 +24,7 @@ class RAG_QA:
             # self.documents.extend(sents)
             chunk = ""
             for sent in sents:
-                if len(chunk.split()) + len(sent.split()) <= 150:
+                if len(chunk.split()) + len(sent.split()) <= 180:
                     chunk += " " + sent
                 else:
                     self.documents.append(chunk.strip())
@@ -42,21 +42,38 @@ class RAG_QA:
         collection.add(documents=self.documents, embeddings=embeddings, ids=[str(i) for i in range(len(self.documents))])
         return collection
 
-    def retrieve_context(self, question, collection, top_k=10):
+    def retrieve_context(self, question, collection, top_k=8):
         q_emb = self.embedder.encode([question], normalize_embeddings=True)
         results = collection.query(query_embeddings=q_emb.tolist(), n_results=top_k)
         return " ".join(results["documents"][0]), results
 
     def generate_answer(self, question, context):
         # input_text = f"question: {question} context: {context}"
-        input_text = f"""Answer the question using only the information from the context. Respond in one short sentence
+        # input_text = f"""Answer using only the provided context, in under 10 words. The answer should be meaningful and help understand the situation.
         
-        Context: {context} 
+        # Context: {context} 
         
-        Question: {question} 
+        # Question: {question} 
         
-        Answer:"""
+        # Answer:"""
+
+        input_text = f"""Question: {question}
+
+            Answer using only the provided context. Keep it under 10 words.
+            Your answer should:
+                •	Be meaningful, not generic.
+                •	Reflect key details (species, actions, consequences).
+                •	Prioritize expected or implied elements over surface-level summary.
+                •	Reflect key values or turning points (e.g., growth, responsibility, ethics, etc.).
+                •	Prioritize content that aligns with the central themes or changes
+
+            Context: {context}
+
+            Answer:"""
        
+        # print(f"*** \n{input_text}\n ***")
+
+
         return self.get_response_from_llama(input_text)
     
        
@@ -100,6 +117,7 @@ if __name__ == "__main__":
         all_qa_pairs = json.load(f)
 
     question_indices_to_run = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]  
+    # question_indices_to_run = [9]  
 
     if question_indices_to_run:
         qa_pairs = [all_qa_pairs[i] for i in question_indices_to_run if i < len(all_qa_pairs)]
@@ -129,3 +147,5 @@ if __name__ == "__main__":
         for ref in qa['references']:
             print(f"- {ref}")
         # rag.bleu_scores(answer, qa["references"])
+
+        
