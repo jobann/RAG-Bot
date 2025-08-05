@@ -48,7 +48,7 @@ class RAG_QA:
         return " ".join(results["documents"][0]), results
 
     def generate_answer(self, question, context):
-
+        
         # Simple prompt due to token limit
         input_text = f"question: {question} context: {context}"
        
