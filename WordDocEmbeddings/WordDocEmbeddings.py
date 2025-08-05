@@ -112,20 +112,24 @@ class WordDocEmbeddings:
 
     def _process_tables(self, tables):
         for t_index, table in enumerate(tables):
-            table_info = []
+            rows = []
             for r_index, row in enumerate(table.rows):
+                row_data = []
                 for c_index, cell in enumerate(row.cells):
-                    table_info.append({
+                    row_data.append({
                         "text": cell.text.strip(),
                         "row_index": r_index,
                         "col_index": c_index,
                         "metadata": self._extract_cell_metadata(cell)
                     })
+                rows.append(row_data)
 
             self.blocks.append({
                 "id": f"block_{self.block_id}",
                 "table_index": t_index,
-                "table_info": table_info
+                "table_info": {
+                    "rows": rows
+                }
             })
             self.block_id += 1
 
@@ -135,16 +139,6 @@ class WordDocEmbeddings:
         self._process_paragraphs(doc.paragraphs)
         self._process_tables(doc.tables)
         print(f"Extracted {len(self.blocks)} formatted blocks.")
-
-    def store(self):
-        print(f"Storing into ChromaDB...")
-        for block in self.blocks:
-            self.collection.add(
-                ids=[block["id"]],
-                documents=[block["text"]],
-                metadatas=[block["metadata"]]
-            )
-        print("Storage complete.")
 
     def print_blocks(self):
         for block in self.blocks:
@@ -166,14 +160,84 @@ class WordDocEmbeddings:
             # print(json.dumps(metadata, indent=2))
             print("=" * 50)
 
+
+    def _generate_embedding_input(self, block):
+        if "text" in block:  # Paragraph block
+            base_text = block["text"]
+            metadata_str = json.dumps(block.get("metadata", {}), indent=2)
+            return f"{base_text}\n\nMetadata:\n{metadata_str}"
+
+        elif "table_info" in block:  # Table block
+            table_rows = block["table_info"]["rows"]
+            table_text_lines = []
+            for row in table_rows:
+                row_text = " | ".join(cell["text"] for cell in row)
+                table_text_lines.append(row_text)
+            table_text = "\n".join(table_text_lines)
+            metadata_str = json.dumps(block["table_info"], indent=2)
+            return f"Table:\n{table_text}\n\nMetadata:\n{metadata_str}"
+
+        else:
+            return "Unknown block structure"
+
+    def _flatten_metadata(self, metadata: dict, parent_key: str = "", sep: str = "_"):
+        flat = {}
+        for k, v in metadata.items():
+            key = f"{parent_key}{sep}{k}" if parent_key else k
+            if isinstance(v, dict):
+                flat.update(self._flatten_metadata(v, key, sep=sep))
+            elif isinstance(v, list):
+                # Convert lists to JSON strings to preserve structure in string format
+                flat[key] = json.dumps(v)
+            else:
+                flat[key] = v
+        return flat
+
+    def store(self):
+        print(f"Storing into ChromaDB...")
+        for block in self.blocks:
+            embedding_input = self._generate_embedding_input(block)
+            flat_metadata = self._flatten_metadata(block.get("metadata", {}))
+            # print(flat_metadata)
+            if flat_metadata:
+                self.collection.add(
+                    ids=[block["id"]],
+                    documents=[embedding_input],
+                    metadatas=[flat_metadata]
+                )
+            else:
+                self.collection.add(
+                    ids=[block["id"]],
+                    documents=[embedding_input]
+                )
+        print("Storage complete.")
+
+
+    def retrieve(self, query: str, top_k: int = 3):
+        print(f"\n🔍 Query: {query}")
+        results = self.collection.query(
+            query_texts=[query],
+            n_results=top_k
+        )
+
+        for i, doc in enumerate(results['documents'][0]):
+            metadata = results['metadatas'][0][i]
+            doc_id = results['ids'][0][i]
+            print(f"\n--- Result {i+1} ---")
+            print(f"ID: {doc_id}")
+            clean_doc = doc.split("\n\nMetadata:")[0] if "Metadata:" in doc else doc
+            print(f"Document:\n{clean_doc}")
+            print(f"Metadata:\n{json.dumps(metadata, indent=2)}")
+
     def run(self):
         self.extract()
         print("\n\n\n")
-        self.print_blocks()
-        # self.store()
+        # self.print_blocks()
+        self.store()
 
 
 
 if __name__ == "__main__":
     wordDocEmbeddings = WordDocEmbeddings(docx_path="./data/Sample_WordDocument.docx")
     wordDocEmbeddings.run()
+    wordDocEmbeddings.retrieve("Which bank is in Brampton?")
