@@ -2,6 +2,7 @@ from docx import Document
 from chromadb import PersistentClient
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 import json
+import requests
 
 
 class WordDocEmbeddings:
@@ -169,13 +170,15 @@ class WordDocEmbeddings:
 
         elif "table_info" in block:  # Table block
             table_rows = block["table_info"]["rows"]
+            if not table_rows or len(table_rows[0]) < 2:
+                return "Table data insufficient"
+            header = [cell["text"] for cell in table_rows[0]]
             table_text_lines = []
-            for row in table_rows:
-                row_text = " | ".join(cell["text"] for cell in row)
-                table_text_lines.append(row_text)
-            table_text = "\n".join(table_text_lines)
-            metadata_str = json.dumps(block["table_info"], indent=2)
-            return f"Table:\n{table_text}\n\nMetadata:\n{metadata_str}"
+            for row in table_rows[1:]:  # skip header row
+                if len(row) >= len(header):
+                    sentence_parts = [f"{header[i]} is {row[i]['text']}" for i in range(len(header))]
+                    table_text_lines.append(". ".join(sentence_parts) + ".")
+            return "\n".join(table_text_lines)
 
         else:
             return "Unknown block structure"
@@ -198,6 +201,7 @@ class WordDocEmbeddings:
         for block in self.blocks:
             embedding_input = self._generate_embedding_input(block)
             flat_metadata = self._flatten_metadata(block.get("metadata", {}))
+            # print(embedding_input)
             # print(flat_metadata)
             if flat_metadata:
                 self.collection.add(
@@ -213,21 +217,60 @@ class WordDocEmbeddings:
         print("Storage complete.")
 
 
-    def retrieve(self, query: str, top_k: int = 3):
-        print(f"\n🔍 Query: {query}")
+    # def retrieve(self, query: str, top_k: int = 3):
+    #     print(f"\n Query: {query}")
+    #     results = self.collection.query(
+    #         query_texts=[query],
+    #         n_results=top_k
+    #     )
+
+    #     for i, doc in enumerate(results['documents'][0]):
+    #         metadata = results['metadatas'][0][i]
+    #         doc_id = results['ids'][0][i]
+    #         print(f"\n--- Result {i+1} ---")
+    #         print(f"ID: {doc_id}")
+    #         clean_doc = doc.split("\n\nMetadata:")[0] if "Metadata:" in doc else doc
+    #         print(f"Document:\n{clean_doc}")
+    #         print(f"Metadata:\n{json.dumps(metadata, indent=2)}")
+
+
+
+    def ask_llama(self, query: str, top_k: int = 3, model: str = "llama3.2"):
+        print(f"\n\n{query}")
+
         results = self.collection.query(
             query_texts=[query],
             n_results=top_k
         )
 
-        for i, doc in enumerate(results['documents'][0]):
-            metadata = results['metadatas'][0][i]
-            doc_id = results['ids'][0][i]
-            print(f"\n--- Result {i+1} ---")
-            print(f"ID: {doc_id}")
-            clean_doc = doc.split("\n\nMetadata:")[0] if "Metadata:" in doc else doc
-            print(f"Document:\n{clean_doc}")
-            print(f"Metadata:\n{json.dumps(metadata, indent=2)}")
+
+        context = "\n\n".join(results["documents"][0])
+
+
+        prompt = f"""You are an intelligent assistant. Use the following context only to answer the question as accurately and concisely as possible.
+
+        Context:
+        {context}
+
+        Question: {query}
+        Answer:"""
+
+        print(prompt)
+        
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False
+            }
+        )
+
+        if response.status_code == 200:
+            answer = response.json()["response"]
+            print(f"LLaMA Answer:\n{answer}\n\n")
+        else:
+            print(f"Failed to query LLaMA: {response.status_code}, {response.text}")
 
     def run(self):
         self.extract()
@@ -240,4 +283,5 @@ class WordDocEmbeddings:
 if __name__ == "__main__":
     wordDocEmbeddings = WordDocEmbeddings(docx_path="./data/Sample_WordDocument.docx")
     wordDocEmbeddings.run()
-    wordDocEmbeddings.retrieve("Which bank is in Brampton?")
+    wordDocEmbeddings.ask_llama("Which bank is in Brampton?")
+    wordDocEmbeddings.ask_llama("Which text is bold in document?")
